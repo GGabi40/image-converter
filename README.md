@@ -38,12 +38,9 @@ If multiple images are uploaded, they are compressed into a `.zip` file for easy
 4. A preview of the converted image is displayed.
 5. A download link is created for each converted image, and if multiple images are uploaded, a `.zip` file is generated for batch downloading.
 
----
-
 ## Visit it Online
 
 You can try the tool here:  
 👉 [Image Converter](https://ggabi40.github.io/image-converter/)
 
----
 Developed with ❤️ by **GGabi40**.
