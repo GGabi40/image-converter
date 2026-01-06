@@ -4,8 +4,6 @@ This project allows users to convert images between `.png`, `.jpeg`, `.jpg`, and
 It uses the `<canvas>` element to process images and provides an instant download link for each converted file.  
 If multiple images are uploaded, they are compressed into a `.zip` file for easy download.
 
----
-
 ## Features
 
 - Convert images between `.png`, `.jpeg`, `.jpg`, and `.webp` formats.
@@ -20,8 +18,6 @@ If multiple images are uploaded, they are compressed into a `.zip` file for easy
 - **HTML**: Structure of the webpage.
 - **JavaScript**: Image processing and conversion using `<canvas>`.
 - **JSZip** – ZIP file generation for batch downloads
-
----
 
 ## How to Use
 
