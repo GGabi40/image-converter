@@ -1,55 +1,71 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Image Converter ➡️ WEBP </title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Image Converter ↔️ PNG · JPG · WebP · ZIP</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css"
+    />
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            margin: auto;
-        }
+      body {
+        font-family: Arial, sans-serif;
+        text-align: center;
+        margin: auto;
+      }
 
-        a {
-            display: block;
-            margin: auto;
-        }
-        
-        #gallery {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            margin-top: 20px;
-        }
+      a {
+        display: block;
+        margin: auto;
+      }
 
-        input[type="file"] {
-            margin: auto;
-            margin-bottom: 20px;
-        }
-        
-        .image-container {
-            margin: 10px;
-            text-align: center;
-        }
-        img {
-            max-width: 200px;
-            max-height: 200px;
-            display: block;
-            margin-bottom: 5px;
-        }
+      #gallery {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        margin-top: 20px;
+      }
+
+      input[type="file"], #formatSelect {
+        margin: auto;
+        margin-bottom: 20px;
+      }
+
+      .image-container {
+        margin: 10px;
+        text-align: center;
+      }
+      img {
+        max-width: 200px;
+        max-height: 200px;
+        display: block;
+        margin-bottom: 5px;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <h1>PNG / JPEG to WebP</h1>
-    <input type="file" id="fileInput" accept="image/png, image/jpeg" multiple>
-    <button id="convertBtn">Convertir a WebP</button>
+    <input
+      type="file"
+      id="fileInput"
+      accept="image/png, image/jpeg, image/webp"
+      multiple
+    />
+
+    <label for="formatSelect">Convertir a:</label>
+    <select id="formatSelect">
+      <option value="image/webp">WebP</option>
+      <option value="image/jpeg">JPG</option>
+      <option value="image/png">PNG</option>
+    </select>
+
+    <button id="convertBtn">Convertir</button>
     <div id="zip-download"></div>
     <div id="gallery"></div>
 
     <!-- JSZip -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="./script.js"></script>
-</body>
+  </body>
 </html>
