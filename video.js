@@ -34,6 +34,31 @@ const FORMAT_CONFIG = {
   },
 };
 
+// Códecs de video que, copiados tal cual (sin recodificar) dentro de cada
+// contenedor, reproducen en la gran mayoría de reproductores (incluido
+// Windows Media Player / la app "Reproductor multimedia" sin extensiones
+// pagas). Si el video de origen usa otro códec (p. ej. HEVC/H.265, típico
+// de iPhone), el "copy" rápido igual copiaría ese códec sin tocarlo y el
+// archivo resultante podría no reproducirse pese a tener la extensión
+// correcta — por eso en ese caso forzamos la recodificación de abajo.
+const SAFE_COPY_VIDEO_CODECS = {
+  mp4: ["h264"],
+  mov: ["h264"],
+  mkv: ["h264"],
+  avi: ["h264"],
+  webm: ["vp8", "vp9"],
+};
+
+// Busca la primera línea "Stream ...: Video: <codec> ..." en el log de
+// FFmpeg para saber con qué códec viene el video de entrada.
+const detectVideoCodec = (logLines) => {
+  for (const line of logLines) {
+    const match = /Video:\s*([a-z0-9_]+)/i.exec(line);
+    if (match) return match[1].toLowerCase();
+  }
+  return null;
+};
+
 // Construye los argumentos de recodificación. Si `fastMode` está activo,
 // baja resolución y calidad para acelerar el encode (el usuario lo elige
 // explícitamente; por defecto se mantiene la resolución original).
@@ -72,6 +97,7 @@ class FFmpegWorkerClient {
     this.nextId = 0;
     this.pending = new Map();
     this.onProgress = null;
+    this.recentLogs = [];
 
     this.worker.onmessage = (event) => {
       const { id, type, result, error, data } = event.data;
@@ -81,7 +107,13 @@ class FFmpegWorkerClient {
         return;
       }
 
-      if (type === "log") return;
+      if (type === "log") {
+        const message = data?.message ?? String(data);
+        console.debug("[ffmpeg]", message);
+        this.recentLogs.push(message);
+        if (this.recentLogs.length > 100) this.recentLogs.shift();
+        return;
+      }
 
       const pending = this.pending.get(id);
       if (!pending) return;
@@ -120,8 +152,27 @@ class FFmpegWorkerClient {
     return this.send("deleteFile", { path });
   }
 
+  // Última línea de log de FFmpeg que parece describir un error real
+  // (ignora las líneas de progreso tipo "frame=... fps=...").
+  lastErrorLine() {
+    for (let i = this.recentLogs.length - 1; i >= 0; i--) {
+      const line = this.recentLogs[i]?.trim();
+      if (line && !/^(frame=|size=|Aborted\(\)|video:.*audio:)/.test(line)) return line;
+    }
+    return "";
+  }
+
   exec(args) {
     return this.send("exec", { args });
+  }
+
+  // Igual que exec(), pero además devuelve las líneas de log que FFmpeg
+  // imprimió durante esta ejecución puntual (útil para inspeccionar, por
+  // ejemplo, con qué códec viene el archivo de entrada).
+  async execWithLogs(args) {
+    const start = this.recentLogs.length;
+    const ret = await this.exec(args);
+    return { ret, logs: this.recentLogs.slice(start) };
   }
 }
 
@@ -141,10 +192,72 @@ const replaceExtension = (filename, newExt) => {
   return filename.replace(/\.[a-z0-9]+$/i, `.${newExt}`);
 };
 
-const setStatus = (text) => {
+const ICON_SPINNER =
+  '<svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-9-9" /></svg>';
+const ICON_SUCCESS =
+  '<svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>';
+const ICON_WARNING =
+  '<svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" /><path d="M12 9v4" /><path d="M12 17h.01" /></svg>';
+
+const setStatus = (text, state) => {
   const status = document.querySelector("#status");
-  if (status) status.textContent = text;
+  if (!status) return;
+  status.classList.remove("is-loading", "is-success", "is-error");
+  if (!text) {
+    status.innerHTML = "";
+    return;
+  }
+  const icon = state === "loading" ? ICON_SPINNER : state === "success" ? ICON_SUCCESS : state === "error" ? ICON_WARNING : "";
+  if (state) status.classList.add(`is-${state}`);
+  status.innerHTML = `${icon}<span>${text}</span>`;
 };
+
+const addWarning = (gallery, text) => {
+  if (!gallery) return;
+  const warn = document.createElement("div");
+  warn.classList.add("warning-item");
+  warn.innerHTML = `${ICON_WARNING}<span>${text}</span>`;
+  gallery.appendChild(warn);
+};
+
+const dropzone = document.querySelector("#dropzone");
+const fileInputEl = document.querySelector("#fileInput");
+const fileSummary = document.querySelector("#fileSummary");
+
+const updateFileSummary = () => {
+  if (!fileSummary || !fileInputEl) return;
+  const count = fileInputEl.files ? fileInputEl.files.length : 0;
+  fileSummary.textContent =
+    count === 0 ? "" : count === 1 ? `1 archivo seleccionado: ${fileInputEl.files[0].name}` : `${count} archivos seleccionados`;
+};
+
+if (fileInputEl) {
+  fileInputEl.addEventListener("change", updateFileSummary);
+}
+
+if (dropzone && fileInputEl) {
+  ["dragenter", "dragover"].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      dropzone.classList.add("is-dragover");
+    });
+  });
+
+  ["dragleave", "dragend"].forEach((eventName) => {
+    dropzone.addEventListener(eventName, () => {
+      dropzone.classList.remove("is-dragover");
+    });
+  });
+
+  dropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropzone.classList.remove("is-dragover");
+    if (e.dataTransfer?.files?.length) {
+      fileInputEl.files = e.dataTransfer.files;
+      updateFileSummary();
+    }
+  });
+}
 
 const button = document.querySelector("#convertBtn");
 
@@ -164,7 +277,7 @@ button.addEventListener("click", async () => {
   if (zipContainer) zipContainer.innerHTML = "";
 
   if (!files || files.length === 0) {
-    alert("Por favor, subí al menos 1 video.");
+    setStatus("Elegí al menos un video antes de convertir.", "error");
     return;
   }
 
@@ -173,7 +286,7 @@ button.addEventListener("click", async () => {
   try {
     const engine = getClient();
 
-    setStatus("Cargando motor de conversión (FFmpeg)... puede tardar unos segundos la primera vez.");
+    setStatus("Cargando motor de conversión (FFmpeg)... puede tardar unos segundos la primera vez.", "loading");
     engine.onProgress = null;
     await engine.load();
 
@@ -193,13 +306,33 @@ button.addEventListener("click", async () => {
         let data = null;
 
         // Intento rápido: copiar los streams sin recodificar (casi
-        // instantáneo). Solo funciona si el códec de origen es compatible
-        // con el contenedor de destino; si no, FFmpeg falla y recodificamos.
+        // instantáneo). Solo mapeamos video+audio (no subtítulos/timecode/
+        // metadata) porque esas pistas suelen ser las que el contenedor de
+        // destino rechaza con "codec not supported in container". Además,
+        // solo aceptamos el resultado si el códec de video de origen es uno
+        // ampliamente compatible (p. ej. H.264): copiar tal cual un origen
+        // HEVC/H.265 (típico de iPhone) produciría un archivo con la
+        // extensión correcta pero que muchos reproductores (Windows Media
+        // Player sin extensiones pagas, etc.) no pueden reproducir. En
+        // cualquier otro caso recodificamos abajo.
         if (!config.isGif) {
-          setStatus(`Analizando ${file.name}...`);
+          setStatus(`Analizando ${file.name}...`, "loading");
           try {
-            const ret = await engine.exec(["-i", inputName, "-map", "0", "-c", "copy", outputName]);
-            if (ret === 0) {
+            const { ret, logs } = await engine.execWithLogs([
+              "-i",
+              inputName,
+              "-map",
+              "0:v:0?",
+              "-map",
+              "0:a:0?",
+              "-c",
+              "copy",
+              outputName,
+            ]);
+            const sourceCodec = detectVideoCodec(logs);
+            const safeCodecs = SAFE_COPY_VIDEO_CODECS[outputExt];
+            const codecIsSafe = !sourceCodec || !safeCodecs || safeCodecs.includes(sourceCodec);
+            if (ret === 0 && codecIsSafe) {
               const probe = await engine.readFile(outputName);
               if (probe && probe.length > 0) data = probe;
             }
@@ -213,10 +346,10 @@ button.addEventListener("click", async () => {
             await engine.deleteFile(outputName);
           } catch {}
 
-          setStatus(`Convirtiendo ${file.name} (0%)...`);
+          setStatus(`Convirtiendo ${file.name} (0%)...`, "loading");
           engine.onProgress = (progressData) => {
             const pct = Math.min(100, Math.max(0, Math.round((progressData?.progress || 0) * 100)));
-            setStatus(`Convirtiendo ${file.name} (${pct}%)...`);
+            setStatus(`Convirtiendo ${file.name} (${pct}%)...`, "loading");
           };
 
           const args = ["-i", inputName, ...buildTranscodeArgs(outputExt, fastMode), outputName];
@@ -244,6 +377,7 @@ button.addEventListener("click", async () => {
         }
 
         const label = document.createElement("p");
+        label.classList.add("result-name");
         label.textContent = outName;
         container.appendChild(label);
 
@@ -261,11 +395,8 @@ button.addEventListener("click", async () => {
         convertedCount++;
       } catch (err) {
         console.error(err);
-        if (gallery) {
-          const warn = document.createElement("p");
-          warn.textContent = `⚠️ No se pudo convertir: ${file.name}`;
-          gallery.appendChild(warn);
-        }
+        const detail = engine.lastErrorLine();
+        addWarning(gallery, detail ? `No se pudo convertir: ${file.name} (${detail})` : `No se pudo convertir: ${file.name}`);
       } finally {
         try {
           await engine.deleteFile(inputName);
@@ -279,7 +410,7 @@ button.addEventListener("click", async () => {
     engine.onProgress = null;
 
     if (files.length > 1 && convertedCount > 0) {
-      setStatus("Generando archivo .zip...");
+      setStatus("Generando archivo .zip...", "loading");
       const zipBlob = await zip.generateAsync({ type: "blob" });
       const zipLink = document.createElement("a");
       zipLink.href = URL.createObjectURL(zipBlob);
@@ -288,10 +419,13 @@ button.addEventListener("click", async () => {
       if (zipContainer) zipContainer.appendChild(zipLink);
     }
 
-    setStatus(convertedCount > 0 ? "¡Conversión completa!" : "No se pudo convertir ningún archivo.");
+    setStatus(
+      convertedCount > 0 ? "¡Conversión completa!" : "No se pudo convertir ningún archivo.",
+      convertedCount > 0 ? "success" : "error"
+    );
   } catch (err) {
     console.error(err);
-    setStatus("Ocurrió un error cargando o ejecutando FFmpeg. Revisá la consola para más detalles.");
+    setStatus("Ocurrió un error cargando o ejecutando FFmpeg. Revisá la consola para más detalles.", "error");
   } finally {
     button.disabled = false;
   }

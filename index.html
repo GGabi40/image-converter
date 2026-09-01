@@ -1,82 +1,76 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Image Converter ↔️ PNG · JPG · WebP · ZIP</title>
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css"
+    <title>Conversor de Imágenes · PNG · JPG · WebP</title>
+    <meta
+      name="description"
+      content="Convertí imágenes entre PNG, JPG y WebP directo en tu navegador, sin subir nada a un servidor."
     />
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-        text-align: center;
-        margin: auto;
-      }
-
-      a {
-        display: block;
-        margin: auto;
-      }
-
-      #gallery {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: center;
-        margin-top: 20px;
-      }
-
-      input[type="file"], #formatSelect {
-        margin: auto;
-        margin-bottom: 20px;
-      }
-
-      .image-container {
-        margin: 10px;
-        text-align: center;
-      }
-      img {
-        max-width: 200px;
-        max-height: 200px;
-        display: block;
-        margin-bottom: 5px;
-      }
-
-      nav {
-        margin-bottom: 20px;
-      }
-
-      nav a {
-        display: inline;
-        margin: 0 8px;
-      }
-    </style>
+    <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <nav>
-      <a href="./index.html" style="display:inline"><strong>Conversor de Imágenes</strong></a>
-      <a href="./video.html" style="display:inline">Conversor de Video</a>
-    </nav>
+    <div class="page">
+      <header class="topbar">
+        <a class="brand" href="./index.html">
+          <img src="./assets/logo-white.png" alt="Logo de Convertidor" class="brand-logo" />
+          <span class="brand-name">Convertidor</span>
+        </a>
+        <nav class="tabs" aria-label="Secciones">
+          <a href="./index.html" class="tab" aria-current="page">Imágenes</a>
+          <a href="./video.html" class="tab">Video</a>
+        </nav>
+      </header>
 
-    <h1>PNG / JPEG to WebP</h1>
-    <input
-      type="file"
-      id="fileInput"
-      accept="image/png, image/jpeg, image/webp"
-      multiple
-    />
+      <main class="content">
+        <section class="hero">
+          <h1>Convertí tus imágenes al instante</h1>
+          <p class="hero-subtitle">
+            PNG, JPG y WebP — todo el proceso ocurre en tu navegador, no se sube nada a un servidor.
+          </p>
+        </section>
 
-    <label for="formatSelect">Convertir a:</label>
-    <select id="formatSelect">
-      <option value="image/webp">WebP</option>
-      <option value="image/jpeg">JPG</option>
-      <option value="image/png">PNG</option>
-    </select>
+        <section class="card" aria-label="Conversor de imágenes">
+          <div class="dropzone" id="dropzone">
+            <svg class="dropzone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 16V4M12 4l-4 4M12 4l4 4" />
+              <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+            </svg>
+            <p class="dropzone-title">Arrastrá tus imágenes acá</p>
+            <p class="dropzone-hint" id="dropzone-hint">o hacé clic para elegir archivos — PNG, JPG o WebP</p>
+            <input
+              type="file"
+              id="fileInput"
+              accept="image/png, image/jpeg, image/webp"
+              multiple
+              aria-describedby="dropzone-hint"
+            />
+          </div>
+          <p class="file-summary" id="fileSummary" aria-live="polite"></p>
 
-    <button id="convertBtn">Convertir</button>
-    <div id="zip-download"></div>
-    <div id="gallery"></div>
+          <div class="field-row">
+            <label for="formatSelect" class="field-label">Convertir a</label>
+            <select id="formatSelect" class="select">
+              <option value="image/webp">WebP</option>
+              <option value="image/jpeg">JPG</option>
+              <option value="image/png">PNG</option>
+            </select>
+          </div>
+
+          <button id="convertBtn" class="btn btn-primary btn-block">Convertir imágenes</button>
+
+          <p class="status-message" id="status" role="status" aria-live="polite"></p>
+        </section>
+
+        <div id="zip-download" class="zip-download"></div>
+        <section id="gallery" class="gallery" aria-label="Resultados de la conversión"></section>
+      </main>
+
+      <footer class="footer">
+        <p>Desarrollado por GGabi40 · Todo el procesamiento ocurre en tu navegador.</p>
+      </footer>
+    </div>
 
     <!-- JSZip -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
