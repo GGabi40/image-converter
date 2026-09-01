@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Video Converter ↔️ MP4 · WebM · MOV · AVI · MKV · GIF</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css"
+    />
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        text-align: center;
+        margin: auto;
+      }
+
+      a {
+        display: block;
+        margin: auto;
+      }
+
+      nav {
+        margin-bottom: 20px;
+      }
+
+      nav a {
+        display: inline;
+        margin: 0 8px;
+      }
+
+      #gallery {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        margin-top: 20px;
+      }
+
+      input[type="file"], #formatSelect {
+        margin: auto;
+        margin-bottom: 20px;
+      }
+
+      .video-container {
+        margin: 10px;
+        text-align: center;
+        max-width: 320px;
+      }
+      video, img.gif-preview {
+        max-width: 300px;
+        max-height: 220px;
+        display: block;
+        margin-bottom: 5px;
+      }
+
+      #status {
+        margin: 15px auto;
+        max-width: 500px;
+      }
+
+      progress {
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <a href="./index.html" style="display:inline">Conversor de Imágenes</a>
+      <a href="./video.html" style="display:inline"><strong>Conversor de Video</strong></a>
+    </nav>
+
+    <h1>Conversor de Video</h1>
+    <p>Convertí videos entre MP4, WebM, MOV, AVI, MKV y GIF, directo en tu navegador.</p>
+
+    <input
+      type="file"
+      id="fileInput"
+      accept="video/*"
+      multiple
+    />
+
+    <label for="formatSelect">Convertir a:</label>
+    <select id="formatSelect">
+      <option value="mp4">MP4</option>
+      <option value="webm">WebM</option>
+      <option value="mov">MOV</option>
+      <option value="avi">AVI</option>
+      <option value="mkv">MKV</option>
+      <option value="gif">GIF</option>
+    </select>
+
+    <p>
+      <label for="fastMode">
+        <input type="checkbox" id="fastMode" style="width:auto;display:inline-block;margin-right:6px;" />
+        Priorizar velocidad (reduce resolución y calidad cuando hace falta recodificar)
+      </label>
+    </p>
+
+    <button id="convertBtn">Convertir</button>
+
+    <div id="status"></div>
+    <div id="zip-download"></div>
+    <div id="gallery"></div>
+
+    <!-- JSZip -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="./video.js"></script>
+  </body>
+</html>
