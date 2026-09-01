@@ -65,6 +65,14 @@
   box-sizing: border-box;
 }
 
+/* Los elementos con [hidden] deben ocultarse siempre, incluso cuando su
+   propia clase (p. ej. .field-row, .toggle-row) fija `display: flex`: una
+   regla de autor con la misma especificidad gana contra el `display: none`
+   por defecto del user-agent para [hidden]. */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   height: 100%;
@@ -286,6 +294,41 @@ select:focus-visible,
   display: none;
 }
 
+/* ---------- Selector de modo (tabs dentro de la tarjeta) ---------- */
+
+.mode-tabs {
+  display: flex;
+  gap: var(--space-1);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-1);
+}
+
+.mode-tab {
+  flex: 1;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-soft);
+  font-family: inherit;
+  font-size: var(--text-body-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.mode-tab:hover {
+  color: var(--text-strong);
+}
+
+.mode-tab.is-active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
 /* ---------- Campo / select ---------- */
 
 .field-row {
@@ -297,6 +340,12 @@ select:focus-visible,
 .field-label {
   font-size: var(--text-body-sm);
   font-weight: 500;
+  color: var(--text-soft);
+}
+
+.field-hint {
+  margin: 0;
+  font-size: var(--text-caption);
   color: var(--text-soft);
 }
 
@@ -543,6 +592,12 @@ select:focus-visible,
   font-size: var(--text-caption);
   color: var(--text-soft);
   word-break: break-all;
+  margin: 0;
+}
+
+.result-size {
+  font-size: var(--text-caption);
+  color: var(--success);
   margin: 0;
 }
 
