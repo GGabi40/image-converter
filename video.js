@@ -34,6 +34,31 @@ const FORMAT_CONFIG = {
   },
 };
 
+// Códecs de video que, copiados tal cual (sin recodificar) dentro de cada
+// contenedor, reproducen en la gran mayoría de reproductores (incluido
+// Windows Media Player / la app "Reproductor multimedia" sin extensiones
+// pagas). Si el video de origen usa otro códec (p. ej. HEVC/H.265, típico
+// de iPhone), el "copy" rápido igual copiaría ese códec sin tocarlo y el
+// archivo resultante podría no reproducirse pese a tener la extensión
+// correcta — por eso en ese caso forzamos la recodificación de abajo.
+const SAFE_COPY_VIDEO_CODECS = {
+  mp4: ["h264"],
+  mov: ["h264"],
+  mkv: ["h264"],
+  avi: ["h264"],
+  webm: ["vp8", "vp9"],
+};
+
+// Busca la primera línea "Stream ...: Video: <codec> ..." en el log de
+// FFmpeg para saber con qué códec viene el video de entrada.
+const detectVideoCodec = (logLines) => {
+  for (const line of logLines) {
+    const match = /Video:\s*([a-z0-9_]+)/i.exec(line);
+    if (match) return match[1].toLowerCase();
+  }
+  return null;
+};
+
 // Construye los argumentos de recodificación. Si `fastMode` está activo,
 // baja resolución y calidad para acelerar el encode (el usuario lo elige
 // explícitamente; por defecto se mantiene la resolución original).
@@ -86,7 +111,7 @@ class FFmpegWorkerClient {
         const message = data?.message ?? String(data);
         console.debug("[ffmpeg]", message);
         this.recentLogs.push(message);
-        if (this.recentLogs.length > 12) this.recentLogs.shift();
+        if (this.recentLogs.length > 100) this.recentLogs.shift();
         return;
       }
 
@@ -139,6 +164,15 @@ class FFmpegWorkerClient {
 
   exec(args) {
     return this.send("exec", { args });
+  }
+
+  // Igual que exec(), pero además devuelve las líneas de log que FFmpeg
+  // imprimió durante esta ejecución puntual (útil para inspeccionar, por
+  // ejemplo, con qué códec viene el archivo de entrada).
+  async execWithLogs(args) {
+    const start = this.recentLogs.length;
+    const ret = await this.exec(args);
+    return { ret, logs: this.recentLogs.slice(start) };
   }
 }
 
@@ -274,13 +308,17 @@ button.addEventListener("click", async () => {
         // Intento rápido: copiar los streams sin recodificar (casi
         // instantáneo). Solo mapeamos video+audio (no subtítulos/timecode/
         // metadata) porque esas pistas suelen ser las que el contenedor de
-        // destino rechaza con "codec not supported in container". Si el
-        // códec de video/audio en sí no es compatible, FFmpeg falla acá y
-        // recodificamos abajo.
+        // destino rechaza con "codec not supported in container". Además,
+        // solo aceptamos el resultado si el códec de video de origen es uno
+        // ampliamente compatible (p. ej. H.264): copiar tal cual un origen
+        // HEVC/H.265 (típico de iPhone) produciría un archivo con la
+        // extensión correcta pero que muchos reproductores (Windows Media
+        // Player sin extensiones pagas, etc.) no pueden reproducir. En
+        // cualquier otro caso recodificamos abajo.
         if (!config.isGif) {
           setStatus(`Analizando ${file.name}...`, "loading");
           try {
-            const ret = await engine.exec([
+            const { ret, logs } = await engine.execWithLogs([
               "-i",
               inputName,
               "-map",
@@ -291,7 +329,10 @@ button.addEventListener("click", async () => {
               "copy",
               outputName,
             ]);
-            if (ret === 0) {
+            const sourceCodec = detectVideoCodec(logs);
+            const safeCodecs = SAFE_COPY_VIDEO_CODECS[outputExt];
+            const codecIsSafe = !sourceCodec || !safeCodecs || safeCodecs.includes(sourceCodec);
+            if (ret === 0 && codecIsSafe) {
               const probe = await engine.readFile(outputName);
               if (probe && probe.length > 0) data = probe;
             }
