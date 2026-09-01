@@ -59,6 +59,41 @@ const detectVideoCodec = (logLines) => {
   return null;
 };
 
+// Niveles de compresión: siempre recodifican a MP4/H.264 (el formato con
+// mejor relación peso/compatibilidad) variando CRF, bitrate de audio y un
+// tope de resolución opcional para bajar más el peso final.
+const COMPRESSION_LEVELS = {
+  high: {
+    crf: "20",
+    maxWidth: null,
+    audioBitrate: "192k",
+    description:
+      "Mantiene la resolución original y prioriza la nitidez. El ahorro de peso es moderado: usalo si necesitás la mejor calidad posible.",
+  },
+  balanced: {
+    crf: "27",
+    maxWidth: 1280,
+    audioBitrate: "128k",
+    description:
+      "Recomendado: si el video supera 1280px lo achica un poco y baja levemente la nitidez, algo que casi no se nota a simple vista, a cambio de un ahorro de peso considerable. Es el mejor punto medio entre calidad y tamaño para la mayoría de los casos.",
+  },
+  small: {
+    crf: "33",
+    maxWidth: 854,
+    audioBitrate: "96k",
+    description:
+      "Achica el video a 854px de ancho como máximo y prioriza el ahorro de peso por sobre la nitidez. La pérdida de calidad ya se nota, pero el archivo pesa mucho menos: ideal para enviar por chat o subir rápido.",
+  },
+};
+
+const buildCompressArgs = (level) => {
+  const cfg = COMPRESSION_LEVELS[level] || COMPRESSION_LEVELS.balanced;
+  const args = [];
+  if (cfg.maxWidth) args.push("-vf", `scale='min(${cfg.maxWidth},iw)':'-2'`);
+  args.push("-c:v", "libx264", "-preset", "veryfast", "-crf", cfg.crf, "-c:a", "aac", "-b:a", cfg.audioBitrate);
+  return args;
+};
+
 // Construye los argumentos de recodificación. Si `fastMode` está activo,
 // baja resolución y calidad para acelerar el encode (el usuario lo elige
 // explícitamente; por defecto se mantiene la resolución original).
@@ -192,6 +227,18 @@ const replaceExtension = (filename, newExt) => {
   return filename.replace(/\.[a-z0-9]+$/i, `.${newExt}`);
 };
 
+const formatBytes = (bytes) => {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unitIdx = 0;
+  while (value >= 1024 && unitIdx < units.length - 1) {
+    value /= 1024;
+    unitIdx++;
+  }
+  return `${value.toFixed(1)} ${units[unitIdx]}`;
+};
+
 const ICON_SPINNER =
   '<svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-9-9" /></svg>';
 const ICON_SUCCESS =
@@ -259,7 +306,70 @@ if (dropzone && fileInputEl) {
   });
 }
 
+// ---------- Selector de modo: convertir formato vs. comprimir peso ----------
+
+const modeConvertBtn = document.querySelector("#modeConvertBtn");
+const modeCompressBtn = document.querySelector("#modeCompressBtn");
+const formatRow = document.querySelector("#formatRow");
+const compressionRow = document.querySelector("#compressionRow");
+const fastModeRow = document.querySelector("#fastModeRow");
 const button = document.querySelector("#convertBtn");
+
+let mode = "convert";
+
+const ACTION_LABELS = {
+  convert: {
+    cta: "Convertir videos",
+    verb: "Convirtiendo",
+    doneAll: "¡Conversión completa!",
+    doneSome: (n, total) => `Conversión completa: ${n} de ${total} videos.`,
+    doneNone: "No se pudo convertir ningún archivo.",
+    zipName: "videos_convertidos",
+    failPrefix: "No se pudo convertir",
+  },
+  compress: {
+    cta: "Comprimir videos",
+    verb: "Comprimiendo",
+    doneAll: "¡Compresión completa!",
+    doneSome: (n, total) => `Compresión completa: ${n} de ${total} videos.`,
+    doneNone: "No se pudo comprimir ningún archivo.",
+    zipName: "videos_comprimidos",
+    failPrefix: "No se pudo comprimir",
+  },
+};
+
+const setMode = (newMode) => {
+  mode = newMode;
+  const isCompress = mode === "compress";
+
+  modeConvertBtn?.classList.toggle("is-active", !isCompress);
+  modeConvertBtn?.setAttribute("aria-selected", String(!isCompress));
+  modeCompressBtn?.classList.toggle("is-active", isCompress);
+  modeCompressBtn?.setAttribute("aria-selected", String(isCompress));
+
+  if (formatRow) formatRow.hidden = isCompress;
+  if (compressionRow) compressionRow.hidden = !isCompress;
+  if (fastModeRow) fastModeRow.hidden = isCompress;
+
+  if (button) button.textContent = ACTION_LABELS[mode].cta;
+};
+
+modeConvertBtn?.addEventListener("click", () => setMode("convert"));
+modeCompressBtn?.addEventListener("click", () => setMode("compress"));
+
+// ---------- Explicación del nivel de compresión elegido ----------
+
+const compressionLevelSelect = document.querySelector("#compressionLevel");
+const compressionLevelHint = document.querySelector("#compressionLevelHint");
+
+const updateCompressionHint = () => {
+  if (!compressionLevelHint) return;
+  const level = COMPRESSION_LEVELS[compressionLevelSelect?.value] || COMPRESSION_LEVELS.balanced;
+  compressionLevelHint.textContent = level.description;
+};
+
+compressionLevelSelect?.addEventListener("change", updateCompressionHint);
+updateCompressionHint();
 
 button.addEventListener("click", async () => {
   const input = document.querySelector("#fileInput");
@@ -267,17 +377,20 @@ button.addEventListener("click", async () => {
 
   const gallery = document.querySelector("#gallery");
   const zipContainer = document.querySelector("#zip-download");
+  const isCompress = mode === "compress";
+  const labels = ACTION_LABELS[mode];
   const formatSelect = document.querySelector("#formatSelect");
-  const outputExt = formatSelect?.value || "mp4";
+  const outputExt = isCompress ? "mp4" : formatSelect?.value || "mp4";
   const config = FORMAT_CONFIG[outputExt];
   const fastMode = document.querySelector("#fastMode")?.checked || false;
+  const compressionLevel = document.querySelector("#compressionLevel")?.value || "balanced";
 
   // Limpieza UI
   if (gallery) gallery.innerHTML = "";
   if (zipContainer) zipContainer.innerHTML = "";
 
   if (!files || files.length === 0) {
-    setStatus("Elegí al menos un video antes de convertir.", "error");
+    setStatus(`Elegí al menos un video antes de ${isCompress ? "comprimir" : "convertir"}.`, "error");
     return;
   }
 
@@ -314,8 +427,9 @@ button.addEventListener("click", async () => {
         // HEVC/H.265 (típico de iPhone) produciría un archivo con la
         // extensión correcta pero que muchos reproductores (Windows Media
         // Player sin extensiones pagas, etc.) no pueden reproducir. En
-        // cualquier otro caso recodificamos abajo.
-        if (!config.isGif) {
+        // cualquier otro caso recodificamos abajo. En modo compresión nunca
+        // copiamos: el objetivo es siempre recodificar para reducir el peso.
+        if (!isCompress && !config.isGif) {
           setStatus(`Analizando ${file.name}...`, "loading");
           try {
             const { ret, logs } = await engine.execWithLogs([
@@ -346,13 +460,14 @@ button.addEventListener("click", async () => {
             await engine.deleteFile(outputName);
           } catch {}
 
-          setStatus(`Convirtiendo ${file.name} (0%)...`, "loading");
+          setStatus(`${labels.verb} ${file.name} (0%)...`, "loading");
           engine.onProgress = (progressData) => {
             const pct = Math.min(100, Math.max(0, Math.round((progressData?.progress || 0) * 100)));
-            setStatus(`Convirtiendo ${file.name} (${pct}%)...`, "loading");
+            setStatus(`${labels.verb} ${file.name} (${pct}%)...`, "loading");
           };
 
-          const args = ["-i", inputName, ...buildTranscodeArgs(outputExt, fastMode), outputName];
+          const transcodeArgs = isCompress ? buildCompressArgs(compressionLevel) : buildTranscodeArgs(outputExt, fastMode);
+          const args = ["-i", inputName, ...transcodeArgs, outputName];
           await engine.exec(args);
           data = await engine.readFile(outputName);
         }
@@ -381,6 +496,17 @@ button.addEventListener("click", async () => {
         label.textContent = outName;
         container.appendChild(label);
 
+        if (isCompress) {
+          const reduction = Math.round((1 - blob.size / file.size) * 100);
+          const sizeInfo = document.createElement("p");
+          sizeInfo.classList.add("result-size");
+          sizeInfo.textContent =
+            reduction > 0
+              ? `${formatBytes(file.size)} → ${formatBytes(blob.size)} (-${reduction}%)`
+              : `${formatBytes(file.size)} → ${formatBytes(blob.size)}`;
+          container.appendChild(sizeInfo);
+        }
+
         if (files.length === 1) {
           const a = document.createElement("a");
           a.href = URL.createObjectURL(blob);
@@ -396,7 +522,7 @@ button.addEventListener("click", async () => {
       } catch (err) {
         console.error(err);
         const detail = engine.lastErrorLine();
-        addWarning(gallery, detail ? `No se pudo convertir: ${file.name} (${detail})` : `No se pudo convertir: ${file.name}`);
+        addWarning(gallery, detail ? `${labels.failPrefix}: ${file.name} (${detail})` : `${labels.failPrefix}: ${file.name}`);
       } finally {
         try {
           await engine.deleteFile(inputName);
@@ -414,13 +540,17 @@ button.addEventListener("click", async () => {
       const zipBlob = await zip.generateAsync({ type: "blob" });
       const zipLink = document.createElement("a");
       zipLink.href = URL.createObjectURL(zipBlob);
-      zipLink.download = `videos_convertidos_${outputExt}.zip`;
+      zipLink.download = `${labels.zipName}_${outputExt}.zip`;
       zipLink.textContent = "Descargar .zip";
       if (zipContainer) zipContainer.appendChild(zipLink);
     }
 
     setStatus(
-      convertedCount > 0 ? "¡Conversión completa!" : "No se pudo convertir ningún archivo.",
+      convertedCount > 0
+        ? convertedCount === files.length
+          ? labels.doneAll
+          : labels.doneSome(convertedCount, files.length)
+        : labels.doneNone,
       convertedCount > 0 ? "success" : "error"
     );
   } catch (err) {

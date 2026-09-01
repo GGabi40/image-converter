@@ -32,6 +32,11 @@
         </section>
 
         <section class="card" aria-label="Conversor de video">
+          <div class="mode-tabs" role="tablist" aria-label="Modo">
+            <button type="button" class="mode-tab is-active" id="modeConvertBtn" role="tab" aria-selected="true">Convertir formato</button>
+            <button type="button" class="mode-tab" id="modeCompressBtn" role="tab" aria-selected="false">Comprimir tamaño</button>
+          </div>
+
           <div class="dropzone" id="dropzone">
             <svg class="dropzone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M12 16V4M12 4l-4 4M12 4l4 4" />
@@ -49,7 +54,7 @@
           </div>
           <p class="file-summary" id="fileSummary" aria-live="polite"></p>
 
-          <div class="field-row">
+          <div class="field-row" id="formatRow">
             <label for="formatSelect" class="field-label">Convertir a</label>
             <select id="formatSelect" class="select">
               <option value="mp4">MP4</option>
@@ -61,7 +66,18 @@
             </select>
           </div>
 
-          <div class="toggle-row">
+          <div class="field-row" id="compressionRow" hidden>
+            <label for="compressionLevel" class="field-label">Nivel de compresión</label>
+            <select id="compressionLevel" class="select">
+              <option value="high">Calidad alta (menos ahorro)</option>
+              <option value="balanced" selected>Equilibrado (recomendado)</option>
+              <option value="small">Máxima compresión (peso mínimo)</option>
+            </select>
+            <p class="field-hint" id="compressionLevelHint"></p>
+            <p class="field-hint">La salida siempre es MP4 (H.264), el formato con mejor relación peso/compatibilidad.</p>
+          </div>
+
+          <div class="toggle-row" id="fastModeRow">
             <input type="checkbox" id="fastMode" class="toggle-switch" />
             <label for="fastMode" class="toggle-text">
               <span class="toggle-title">Priorizar velocidad</span>
