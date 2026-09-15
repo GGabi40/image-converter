@@ -8,7 +8,7 @@
 const FORMAT_CONFIG = {
   mp4: {
     mime: "video/mp4",
-    codecArgs: ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-c:a", "aac"],
+    codecArgs: ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-c:a", "aac"],
   },
   webm: {
     mime: "video/webm",
@@ -16,7 +16,7 @@ const FORMAT_CONFIG = {
   },
   mov: {
     mime: "video/quicktime",
-    codecArgs: ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-c:a", "aac"],
+    codecArgs: ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-c:a", "aac"],
   },
   avi: {
     mime: "video/x-msvideo",
@@ -24,7 +24,7 @@ const FORMAT_CONFIG = {
   },
   mkv: {
     mime: "video/x-matroska",
-    codecArgs: ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-c:a", "aac"],
+    codecArgs: ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-c:a", "aac"],
   },
   gif: {
     mime: "image/gif",
@@ -59,54 +59,127 @@ const detectVideoCodec = (logLines) => {
   return null;
 };
 
+// Detecta si el video de origen viene en 10 bits (p. ej. perfil H.264
+// "High 10", típico de iPhone/HDR). Casi ningún móvil de gama media/baja
+// decodifica 10 bits por hardware: si se copia o recodifica sin bajarlo a
+// 8 bits, el video puede no reproducirse en esos dispositivos aunque el
+// códec base (h264) sea "seguro".
+const detectHighBitDepth = (logLines) => {
+  for (const line of logLines) {
+    if (!/Video:/.test(line)) continue;
+    if (/yuv\w*(10|12)\w*|p0[12]0/i.test(line)) return true;
+    if (/High 10|High 4:2:2|High 4:4:4/i.test(line)) return true;
+  }
+  return false;
+};
+
+// Detecta si el video de origen está marcado como HDR (HLG o PQ sobre
+// BT.2020). Reproducido en una pantalla SDR sin tonemapping se ve lavado,
+// apagado o con colores raros aunque el dispositivo sí pueda decodificarlo.
+const detectHDR = (logLines) => {
+  for (const line of logLines) {
+    if (!/Video:/.test(line)) continue;
+    if (/smpte2084|arib-std-b67|bt2020/i.test(line)) return true;
+  }
+  return false;
+};
+
+// Formatos de salida que usan H.264: fuerzan perfil Main + 8 bits +
+// faststart para maximizar compatibilidad (ver buildNormalizationFilter).
+const H264_FORMATS = new Set(["mp4", "mov", "mkv"]);
+
+// Filtro de video común a toda recodificación: normaliza el video de
+// origen a 8 bits (yuv420p) para que cualquier decodificador por hardware
+// lo soporte, y si el origen es HDR, primero lo convierte a SDR/BT.709
+// (tonemap) para evitar el "lavado" de colores. `maxLongSide`, si se pasa,
+// además cota el lado más largo del video (ancho o alto, según orientación):
+// usar solo el ancho rompía el achicado en video vertical (p. ej. un
+// 1080x1920 nunca se topaba con un límite de 1280).
+const buildNormalizationFilter = (isHDR, maxLongSide) => {
+  const scalePart = maxLongSide
+    ? `,scale=w='if(gt(iw,ih),min(iw,${maxLongSide}),-2)':h='if(gt(iw,ih),-2,min(ih,${maxLongSide}))'`
+    : "";
+  if (isHDR) {
+    return `zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p${scalePart}`;
+  }
+  return `format=yuv420p${scalePart}`;
+};
+
 // Niveles de compresión: siempre recodifican a MP4/H.264 (el formato con
 // mejor relación peso/compatibilidad) variando CRF, bitrate de audio y un
 // tope de resolución opcional para bajar más el peso final.
 const COMPRESSION_LEVELS = {
   high: {
     crf: "20",
-    maxWidth: null,
+    maxLongSide: null,
     audioBitrate: "192k",
     description:
       "Mantiene la resolución original y prioriza la nitidez. El ahorro de peso es moderado: usalo si necesitás la mejor calidad posible.",
   },
   balanced: {
     crf: "27",
-    maxWidth: 1280,
+    maxLongSide: 1280,
     audioBitrate: "128k",
     description:
       "Recomendado: si el video supera 1280px lo achica un poco y baja levemente la nitidez, algo que casi no se nota a simple vista, a cambio de un ahorro de peso considerable. Es el mejor punto medio entre calidad y tamaño para la mayoría de los casos.",
   },
   small: {
     crf: "33",
-    maxWidth: 854,
+    maxLongSide: 854,
     audioBitrate: "96k",
     description:
-      "Achica el video a 854px de ancho como máximo y prioriza el ahorro de peso por sobre la nitidez. La pérdida de calidad ya se nota, pero el archivo pesa mucho menos: ideal para enviar por chat o subir rápido.",
+      "Achica el video a 854px en su lado más largo y prioriza el ahorro de peso por sobre la nitidez. La pérdida de calidad ya se nota, pero el archivo pesa mucho menos: ideal para enviar por chat o subir rápido.",
   },
 };
 
-const buildCompressArgs = (level) => {
+// No fijamos `-level`: x264 lo calcula solo a partir de la resolución,
+// bitrate y fps reales de salida. Fijarlo a mano (p. ej. "3.1") puede
+// declarar un nivel más bajo del que el stream realmente necesita — un
+// decodificador hardware estricto puede rechazar ese archivo por la
+// etiqueta incorrecta aunque el contenido en sí sea válido.
+const buildCompressArgs = (level, isHDR) => {
   const cfg = COMPRESSION_LEVELS[level] || COMPRESSION_LEVELS.balanced;
-  const args = [];
-  if (cfg.maxWidth) args.push("-vf", `scale='min(${cfg.maxWidth},iw)':'-2'`);
-  args.push("-c:v", "libx264", "-preset", "veryfast", "-crf", cfg.crf, "-c:a", "aac", "-b:a", cfg.audioBitrate);
+  const args = ["-vf", buildNormalizationFilter(isHDR, cfg.maxLongSide)];
+  args.push(
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    cfg.crf,
+    "-profile:v",
+    "main",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-b:a",
+    cfg.audioBitrate,
+    "-movflags",
+    "+faststart"
+  );
   return args;
 };
 
 // Construye los argumentos de recodificación. Si `fastMode` está activo,
 // baja resolución y calidad para acelerar el encode (el usuario lo elige
-// explícitamente; por defecto se mantiene la resolución original).
-const buildTranscodeArgs = (outputExt, fastMode) => {
+// explícitamente; por defecto se mantiene la resolución original). `isHDR`
+// determina si hace falta tonemapping (ver buildNormalizationFilter); la
+// normalización a 8 bits se aplica siempre.
+const buildTranscodeArgs = (outputExt, fastMode, isHDR) => {
   const config = FORMAT_CONFIG[outputExt];
   const args = [];
 
   if (config.isGif) {
     const fps = fastMode ? 6 : 10;
     const width = fastMode ? 320 : 480;
-    args.push("-vf", `fps=${fps},scale=${width}:-1:flags=lanczos`);
+    const tonemapPrefix = isHDR
+      ? "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p,"
+      : "";
+    args.push("-vf", `${tonemapPrefix}fps=${fps},scale=${width}:-1:flags=lanczos`);
   } else {
     const codecArgs = [...config.codecArgs];
+    let maxLongSide = null;
 
     if (fastMode) {
       const crfIdx = codecArgs.indexOf("-crf");
@@ -115,10 +188,16 @@ const buildTranscodeArgs = (outputExt, fastMode) => {
       if (qIdx !== -1) codecArgs[qIdx + 1] = "15";
 
       // Cota la resolución a 854px en el lado más largo (mantiene proporción).
-      args.push("-vf", "scale='min(854,iw)':'-2'");
+      maxLongSide = 854;
     }
 
+    args.push("-vf", buildNormalizationFilter(isHDR, maxLongSide));
     args.push(...codecArgs);
+
+    if (H264_FORMATS.has(outputExt)) {
+      // Sin `-level`: ver el comentario en buildCompressArgs.
+      args.push("-profile:v", "main", "-pix_fmt", "yuv420p", "-movflags", "+faststart");
+    }
   }
 
   if (config.noAudio) args.push("-an");
@@ -133,6 +212,7 @@ class FFmpegWorkerClient {
     this.pending = new Map();
     this.onProgress = null;
     this.recentLogs = [];
+    this.logCollector = null;
 
     this.worker.onmessage = (event) => {
       const { id, type, result, error, data } = event.data;
@@ -145,6 +225,7 @@ class FFmpegWorkerClient {
       if (type === "log") {
         const message = data?.message ?? String(data);
         console.debug("[ffmpeg]", message);
+        if (this.logCollector) this.logCollector(message);
         this.recentLogs.push(message);
         if (this.recentLogs.length > 100) this.recentLogs.shift();
         return;
@@ -203,11 +284,20 @@ class FFmpegWorkerClient {
 
   // Igual que exec(), pero además devuelve las líneas de log que FFmpeg
   // imprimió durante esta ejecución puntual (útil para inspeccionar, por
-  // ejemplo, con qué códec viene el archivo de entrada).
+  // ejemplo, con qué códec viene el archivo de entrada). Usa un colector
+  // propio en vez de `recentLogs` porque ese buffer tiene un tope fijo de
+  // líneas: en una tanda de varios videos, para el 2do archivo en adelante
+  // ya suele estar lleno con logs de la conversión anterior, y cortar por
+  // índice ahí devolvería siempre un array vacío.
   async execWithLogs(args) {
-    const start = this.recentLogs.length;
-    const ret = await this.exec(args);
-    return { ret, logs: this.recentLogs.slice(start) };
+    const logs = [];
+    this.logCollector = (message) => logs.push(message);
+    try {
+      const ret = await this.exec(args);
+      return { ret, logs };
+    } finally {
+      this.logCollector = null;
+    }
   }
 }
 
@@ -417,18 +507,20 @@ button.addEventListener("click", async () => {
 
         engine.onProgress = null;
         let data = null;
+        let sourceLogs = [];
 
         // Intento rápido: copiar los streams sin recodificar (casi
         // instantáneo). Solo mapeamos video+audio (no subtítulos/timecode/
         // metadata) porque esas pistas suelen ser las que el contenedor de
         // destino rechaza con "codec not supported in container". Además,
         // solo aceptamos el resultado si el códec de video de origen es uno
-        // ampliamente compatible (p. ej. H.264): copiar tal cual un origen
-        // HEVC/H.265 (típico de iPhone) produciría un archivo con la
-        // extensión correcta pero que muchos reproductores (Windows Media
-        // Player sin extensiones pagas, etc.) no pueden reproducir. En
-        // cualquier otro caso recodificamos abajo. En modo compresión nunca
-        // copiamos: el objetivo es siempre recodificar para reducir el peso.
+        // ampliamente compatible (p. ej. H.264) Y viene en 8 bits: copiar tal
+        // cual un origen HEVC/H.265 (típico de iPhone) o un H.264 en 10 bits
+        // (perfil "High 10", también típico de HDR de iPhone) produciría un
+        // archivo con la extensión correcta pero que muchos dispositivos de
+        // gama media/baja no pueden reproducir. En cualquier otro caso
+        // recodificamos abajo. En modo compresión nunca copiamos: el
+        // objetivo es siempre recodificar para reducir el peso.
         if (!isCompress && !config.isGif) {
           setStatus(`Analizando ${file.name}...`, "loading");
           try {
@@ -443,16 +535,25 @@ button.addEventListener("click", async () => {
               "copy",
               outputName,
             ]);
+            sourceLogs = logs;
             const sourceCodec = detectVideoCodec(logs);
             const safeCodecs = SAFE_COPY_VIDEO_CODECS[outputExt];
             const codecIsSafe = !sourceCodec || !safeCodecs || safeCodecs.includes(sourceCodec);
-            if (ret === 0 && codecIsSafe) {
+            const isHighBitDepth = detectHighBitDepth(logs);
+            if (ret === 0 && codecIsSafe && !isHighBitDepth) {
               const probe = await engine.readFile(outputName);
               if (probe && probe.length > 0) data = probe;
             }
           } catch {
             // No se pudo copiar sin recodificar, seguimos abajo con el fallback.
           }
+        } else {
+          // No hicimos el intento de copia (modo compresión, o salida GIF):
+          // igual necesitamos saber si el origen es HDR para normalizarlo.
+          try {
+            const { logs } = await engine.execWithLogs(["-i", inputName]);
+            sourceLogs = logs;
+          } catch {}
         }
 
         if (!data) {
@@ -466,7 +567,10 @@ button.addEventListener("click", async () => {
             setStatus(`${labels.verb} ${file.name} (${pct}%)...`, "loading");
           };
 
-          const transcodeArgs = isCompress ? buildCompressArgs(compressionLevel) : buildTranscodeArgs(outputExt, fastMode);
+          const isHDR = detectHDR(sourceLogs);
+          const transcodeArgs = isCompress
+            ? buildCompressArgs(compressionLevel, isHDR)
+            : buildTranscodeArgs(outputExt, fastMode, isHDR);
           const args = ["-i", inputName, ...transcodeArgs, outputName];
           await engine.exec(args);
           data = await engine.readFile(outputName);
